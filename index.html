@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IF Iris 热流智瞳 - 在线监测大屏</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* 全局主题与基础样式 */
+        :root {
+            --bg-dark: #070b14;
+            --panel-bg: #0d1322;
+            --panel-border: #1a273e;
+            --panel-border-glow: rgba(0, 240, 255, 0.3);
+            --text-main: #a0aec0;
+            --text-bright: #ffffff;
+            --accent-cyan: #00f0ff;
+            --accent-green: #39ff14;
+            --accent-red: #ff3333;
+            --accent-yellow: #ffcc00;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; 
+        }
+
+        /* 顶部导航栏 */
+        .header {
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--panel-border);
+            background: linear-gradient(90deg, #0d1322 0%, #070b14 100%);
+        }
+
+        .header-title {
+            color: var(--accent-cyan);
+            font-size: 1.2rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: 1px;
+        }
+
+        .header-title::before {
+            content: "⬢";
+            font-size: 1.5rem;
+            text-shadow: 0 0 10px var(--accent-cyan);
+        }
+
+        /* 主体网格布局 */
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 15px;
+            gap: 15px;
+            height: calc(100vh - 60px);
+        }
+
+        /* 面板通用样式 */
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            position: relative;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: 8px;
+            border: 1px solid var(--panel-border-glow);
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .panel-header {
+            padding: 10px 15px;
+            font-size: 0.95rem;
+            color: #cbd5e1;
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+        }
+
+        .panel-content { padding: 15px; flex: 1; overflow: hidden; }
+
+        /* 左侧：环境模拟控制台 */
+        .sidebar {
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .control-group { margin-bottom: 20px; }
+        .control-group label {
+            display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--accent-cyan);
+        }
+        .control-group input[type="range"] {
+            width: 100%; cursor: pointer; accent-color: var(--accent-cyan);
+        }
+        .control-group select {
+            width: 100%; padding: 8px; background: #070b14; color: white;
+            border: 1px solid var(--panel-border); border-radius: 4px; font-family: 'Microsoft YaHei';
+        }
+        .val-display { float: right; color: white; font-weight: bold; }
+
+        /* 右侧：仪表盘主区域 */
+        .dashboard-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            grid-template-rows: 3fr 2fr;
+            gap: 15px;
+        }
+
+        /* 内部区块布局 */
+        .chart-main { grid-column: 1 / 2; grid-row: 1 / 2; }
+        .chart-snr { grid-column: 1 / 2; grid-row: 2 / 3; }
+        
+        .right-column {
+            grid-column: 2 / 3;
+            grid-row: 1 / 3;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* 健康度面板特有样式 */
+        .health-panel { display: flex; align-items: center; justify-content: space-between; }
+        .health-score-text { font-size: 2.5rem; font-weight: bold; color: var(--accent-green); }
+        .status-badges { display: flex; gap: 5px; margin-top: 10px; font-size: 0.75rem; font-weight: bold; }
+        .badge { padding: 3px 8px; border-radius: 4px; border: 1px solid; opacity: 0.4; }
+        .badge.active { opacity: 1; box-shadow: 0 0 5px currentColor; }
+        .b-normal { color: var(--accent-green); border-color: var(--accent-green); }
+        .b-warning { color: var(--accent-yellow); border-color: var(--accent-yellow); }
+        .b-alarm { color: var(--accent-red); border-color: var(--accent-red); }
+
+        /* 物理读数与统计特有样式 */
+        .grid-stats {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;
+        }
+        .stat-item span:first-child { color: #718096; }
+        .stat-item span:last-child { float: right; color: white; }
+        
+        .physical-readings {
+            display: flex; justify-content: space-between; text-align: center;
+        }
+        .reading-val { font-size: 1.5rem; color: var(--accent-cyan); margin-top: 5px; font-weight: bold;}
+
+        /* 终端控制台特有样式 */
+        .console-log {
+            font-family: 'Consolas', monospace; font-size: 0.8rem; height: 100%; overflow-y: auto; color: #718096; line-height: 1.4;
+        }
+        .log-time { color: #4a5568; }
+        .log-info { color: var(--accent-cyan); }
+        .log-warn { color: var(--accent-red); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="header-title">IF Iris 热流智瞳 - 熔盐杂质离子原位量化检测与腐蚀风险评估系统 v2.0</div>
+        <div style="color: var(--accent-cyan); cursor: pointer; font-size: 1.2rem;">⏻</div>
+    </div>
+
+    <div class="main-container">
+        
+        <div class="sidebar panel">
+            <div class="panel-header">❖ 环境模拟控制台</div>
+            <div class="panel-content">
+                <p style="font-size: 0.8rem; margin-top: 0; color: #718096;">调节下方参数，观察右侧监测大屏响应闭环。</p>
+                
+                <div class="control-group">
+                    <label>SWV 净峰电流 (mA) <span class="val-display" id="val-current">9.5</span></label>
+                    <input type="range" id="input-current" min="3.5" max="13.0" step="0.1" value="9.5">
+                    <div style="font-size: 0.7rem; color: #4a5568; margin-top: 5px;">模拟微弱法拉第电流波动</div>
+                </div>
+
+                <div class="control-group">
+                    <label>主旁路温差 (°C) <span class="val-display" id="val-tempdiff">5</span></label>
+                    <input type="range" id="input-tempdiff" min="0" max="20" step="1" value="5">
+                    <div style="font-size: 0.7rem; color: #4a5568; margin-top: 5px;">模拟热冲击工况 (安全阈值 < 10°C)</div>
+                </div>
+
+                <div class="control-group">
+                    <label>介质运行温度设定</label>
+                    <select id="input-temp">
+                        <option value="500">500°C - 304不锈钢轻微腐蚀</option>
+                        <option value="565" selected>565°C - 局部点蚀与孔洞扩展</option>
+                        <option value="600">600°C - 严重剥落与深层腐蚀</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            
+            <div class="panel chart-main">
+                <div class="panel-header">
+                    <span>O²⁻ 浓度趋势分析 (wt%)</span>
+                    <span style="color: #718096; font-size: 0.8rem; font-weight: normal;">实时采样率: 100ms | 探头A1</span>
+                </div>
+                <div class="panel-content" style="position: relative;">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel chart-snr">
+                <div class="panel-header">信号质量指标 (信噪比 / 有效性)</div>
+                <div class="panel-content">
+                    <canvas id="snrChart"></canvas>
+                </div>
+            </div>
+
+            <div class="right-column">
+                
+                <div class="panel" style="flex: 1.5;">
+                    <div class="panel-header">系统健康度评估详情</div>
+                    <div class="panel-content health-panel">
+                        <div>
+                            <div style="font-size: 0.9rem; color: #cbd5e1;">综合健康度:</div>
+                            <div class="health-score-text" id="display-health">98%</div>
+                            <div class="status-badges">
+                                <span class="badge b-normal active" id="badge-normal">运行正常</span>
+                                <span class="badge b-warning" id="badge-warning">边界警告</span>
+                                <span class="badge b-alarm" id="badge-alarm">系统警报</span>
+                            </div>
+                        </div>
+                        <div style="width: 130px; height: 130px;">
+                            <canvas id="radarChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel" style="flex: 1;">
+                    <div class="panel-header">统计数据总览</div>
+                    <div class="panel-content grid-stats">
+                        <div class="stat-item"><span>当前 O²⁻:</span> <span id="display-conc" style="color:var(--accent-cyan);font-weight:bold;">0.52 wt%</span></div>
+                        <div class="stat-item"><span>标准差:</span> <span>0.04 wt%</span></div>
+                        <div class="stat-item"><span>近24h峰值:</span> <span>0.81 wt%</span></div>
+                        <div class="stat-item"><span>风险警报:</span> <span style="color:var(--accent-red);">严重 (0)</span></div>
+                    </div>
+                </div>
+
+                <div class="panel" style="flex: 1;">
+                    <div class="panel-header">物理参数监控</div>
+                    <div class="panel-content physical-readings">
+                        <div>
+                            <div style="font-size:0.8rem; color:#718096;">介质温度</div>
+                            <div class="reading-val" id="display-temp">565°C</div>
+                        </div>
+                        <div>
+                            <div style="font-size:0.8rem; color:#718096;">系统压力</div>
+                            <div class="reading-val">0.8 MPa</div>
+                        </div>
+                        <div>
+                            <div style="font-size:0.8rem; color:#718096;">旁路流速</div>
+                            <div class="reading-val">0.2 m/s</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel" style="flex: 1.2;">
+                    <div class="panel-header">终端运行日志</div>
+                    <div class="panel-content console-log" id="terminal-log">
+                        </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 通用图表配置
+        Chart.defaults.color = '#718096';
+        Chart.defaults.font.family = "'Segoe UI', 'Microsoft YaHei', sans-serif";
+
+        // 1. 初始化主趋势图 (浓度)
+        const ctxMain = document.getElementById('mainChart').getContext('2d');
+        const mainChart = new Chart(ctxMain, {
+            type: 'line',
+            data: {
+                labels: Array.from({length: 40}, (_, i) => ''),
+                datasets: [
+                    {
+                        label: '平滑趋势',
+                        data: Array(40).fill(0.52),
+                        borderColor: '#ffffff',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        pointRadius: 0
+                    },
+                    {
+                        label: '原始采集数据 (wt%)',
+                        data: Array(40).fill(0.52),
+                        borderColor: '#00f0ff',
+                        backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                        borderWidth: 1.5,
+                        fill: true,
+                        tension: 0.1,
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    y: { min: 0, max: 1.2, grid: { color: '#1a273e' } },
+                    x: { grid: { display: false } }
+                },
+                plugins: {
+                    legend: { position: 'top', align: 'start', labels: { boxWidth: 12, usePointStyle: true, font: {size: 12} } }
+                }
+            }
+        });
+
+        // 2. 初始化信噪比图 (SNR)
+        const ctxSnr = document.getElementById('snrChart').getContext('2d');
+        const snrChart = new Chart(ctxSnr, {
+            type: 'line',
+            data: {
+                labels: Array.from({length: 40}, (_, i) => ''),
+                datasets: [{
+                    data: Array(40).fill(90),
+                    borderColor: '#00f0ff',
+                    borderWidth: 1.5,
+                    tension: 0.3,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { min: 0, max: 120, grid: { color: '#1a273e' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+
+        // 3. 初始化雷达图 (健康度维度)
+        const ctxRadar = document.getElementById('radarChart').getContext('2d');
+        const radarChart = new Chart(ctxRadar, {
+            type: 'radar',
+            data: {
+                labels: ['信号完整度', '电极阻抗', '热冲击安全', '腐蚀风险'],
+                datasets: [{
+                    data: [100, 100, 100, 100],
+                    backgroundColor: 'rgba(0, 240, 255, 0.2)',
+                    borderColor: '#00f0ff',
+                    pointBackgroundColor: '#ffffff',
+                    pointRadius: 2,
+                    borderWidth: 1.5
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    r: {
+                        angleLines: { color: '#1a273e' },
+                        grid: { color: '#1a273e' },
+                        pointLabels: { color: '#cbd5e1', font: { size: 10, family: 'Microsoft YaHei' } },
+                        ticks: { display: false, min: 0, max: 100 }
+                    }
+                }
+            }
+        });
+
+        // --- 核心业务逻辑与交互 ---
+        const domCurrent = document.getElementById('input-current');
+        const domTempDiff = document.getElementById('input-tempdiff');
+        const domTempSelect = document.getElementById('input-temp');
+        const valCurrent = document.getElementById('val-current');
+        const valTempDiff = document.getElementById('val-tempdiff');
+        
+        const displayConc = document.getElementById('display-conc');
+        const displayHealth = document.getElementById('display-health');
+        const displayTemp = document.getElementById('display-temp');
+        const terminalLog = document.getElementById('terminal-log');
+        
+        const bNormal = document.getElementById('badge-normal');
+        const bWarning = document.getElementById('badge-warning');
+        const bAlarm = document.getElementById('badge-alarm');
+
+        let isAlarmStatus = false;
+
+        function addLog(msg, type='info') {
+            const now = new Date();
+            const time = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+            const cls = type === 'warn' ? 'log-warn' : 'log-info';
+            const prefix = type === 'warn' ? '警告' : '信息';
+            const html = `<div style="margin-bottom:6px"><span class="log-time">[${time}]</span> <span class="${cls}">[${prefix}]: ${msg}</span></div>`;
+            terminalLog.insertAdjacentHTML('beforeend', html);
+            terminalLog.scrollTop = terminalLog.scrollHeight;
+        }
+
+        // 初始化日志
+        addLog('全铂三电极标定完成，基线校正成功。');
+        addLog('旁路系统待命，当前处于干态热备状态。');
+        addLog('静态锁样采集中...');
+
+        function updateSystem() {
+            // 获取输入值
+            const current = parseFloat(domCurrent.value);
+            const tempDiff = parseFloat(domTempDiff.value);
+            const sysTemp = domTempSelect.value;
+
+            // 更新左侧面板显示
+            valCurrent.innerText = current.toFixed(1);
+            valTempDiff.innerText = tempDiff;
+            displayTemp.innerText = sysTemp + '°C';
+
+            // 核心标定方程: ΔI = 11.2947 C + 3.5737
+            let conc = (current - 3.5737) / 11.2947;
+            if (conc < 0) conc = 0;
+            displayConc.innerText = conc.toFixed(2) + ' wt%';
+
+            // 图表1：更新浓度折线图
+            const rawData = mainChart.data.datasets[1].data;
+            const smoothData = mainChart.data.datasets[0].data;
+            rawData.shift(); smoothData.shift();
+            // 加入噪点模拟原始信号
+            const noise = (Math.random() - 0.5) * 0.15;
+            rawData.push(conc + noise);
+            smoothData.push(conc); 
+            mainChart.update();
+
+            // 图表2：更新SNR图 (模拟信号变差)
+            const snrData = snrChart.data.datasets[0].data;
+            snrData.shift();
+            let baseSnr = 90 - (tempDiff * 2) - (conc * 10);
+            snrData.push(baseSnr + (Math.random()-0.5)*10);
+            snrChart.update();
+
+            // 风险判定逻辑
+            let health = 98;
+            let thermalScore = 100;
+            let corrScore = 100;
+            let isRisk = false;
+
+            if (tempDiff >= 10) { health -= (tempDiff - 9) * 5; thermalScore -= 40; isRisk = true; }
+            if (conc >= 0.6) { health -= (conc - 0.5) * 40; corrScore -= 50; isRisk = true; }
+            if (sysTemp == 600) { health -= 15; corrScore -= 30; } 
+            
+            health = Math.max(25, Math.floor(health));
+            displayHealth.innerText = health + '%';
+
+            // 更新雷达图
+            radarChart.data.datasets[0].data = [baseSnr, 100 - (100-health)/2, thermalScore, corrScore];
+            radarChart.update();
+
+            // UI 状态切换与闭环报警日志
+            if (isRisk && !isAlarmStatus) {
+                isAlarmStatus = true;
+                displayHealth.style.color = 'var(--accent-red)';
+                radarChart.data.datasets[0].borderColor = '#ff3333';
+                radarChart.data.datasets[0].backgroundColor = 'rgba(255, 51, 51, 0.2)';
+                
+                bNormal.classList.remove('active');
+                bAlarm.classList.add('active');
+
+                if (tempDiff >= 10) addLog('检测到旁路温差大于10°C，存在热冲击风险！', 'warn');
+                if (conc >= 0.6) addLog('O²⁻ 浓度超过安全阈值，系统腐蚀风险激增！', 'warn');
+                addLog('>>> 前馈干预：正在自动下发测后排空指令，停止静态锁样...', 'warn');
+            } else if (!isRisk && isAlarmStatus) {
+                isAlarmStatus = false;
+                displayHealth.style.color = 'var(--accent-green)';
+                radarChart.data.datasets[0].borderColor = '#00f0ff';
+                radarChart.data.datasets[0].backgroundColor = 'rgba(0, 240, 255, 0.2)';
+                
+                bAlarm.classList.remove('active');
+                bNormal.classList.add('active');
+                addLog('参数已回落至安全区间，系统恢复正常。');
+                addLog('重新进入常态化静态锁样监测。');
+            }
+        }
+
+        // 绑定事件监听
+        domCurrent.addEventListener('input', updateSystem);
+        domTempDiff.addEventListener('input', updateSystem);
+        domTempSelect.addEventListener('change', updateSystem);
+
+        // 启动数据流动画
+        setInterval(updateSystem, 600); 
+    </script>
+</body>
+</html>
